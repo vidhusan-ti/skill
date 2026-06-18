@@ -1,12 +1,16 @@
 ---
 name: export-cursor-transcripts
-description: Export authorized Cursor agent chat transcripts to a Google Drive folder. Use when the user provides a Google Drive folder link and asks to back up, share, or collect Cursor transcript JSONL files from consenting project members.
+description: Copy authorized Cursor agent chat transcripts into a single local folder the user can access. Use when the user asks to export, back up, collect, or package Cursor transcript JSONL or TXT files across local, remote, container, Windows, macOS, or Linux environments.
 disable-model-invocation: true
 ---
 
 # Export Cursor Transcripts
 
-Package authorized local Cursor transcript files and upload them to a Google Drive folder provided by the user.
+Copy authorized local Cursor transcript files into a single user-accessible export folder.
+
+## Reliability Promise
+
+Make the export work in as many environments as possible by probing likely Cursor locations, using portable tooling first, and falling back gracefully. If transcripts are not accessible from the current environment, create the export folder and manifest anyway, then report what was checked and what the user must provide.
 
 ## Safety Rules
 
@@ -14,59 +18,19 @@ Package authorized local Cursor transcript files and upload them to a Google Dri
 - Do not collect chats from another user's account, device, filesystem, or cloud storage unless that user runs this skill themselves or gives explicit authorization.
 - Do not bypass permissions, scrape private folders, read secrets, or upload hidden project data unrelated to Cursor transcripts.
 - If the user asks to gather other people's chats without consent, refuse that part and offer the team workflow below.
-- Treat transcript contents as sensitive. Confirm the target Drive folder is intended for the project team before uploading.
+- Treat transcript contents as sensitive. Confirm the export folder is intended for the people who will access it.
 
 ## Team Workflow
 
-For a team project, each participant should run this skill in their own Cursor session with the same Google Drive folder link. The result is one upload package per user/machine.
+For a team project, each participant should run this skill in their own Cursor session. The result is one local export folder per user/machine.
 
 ## Inputs
 
-Required:
-- Google Drive folder link, for example `https://drive.google.com/drive/folders/<folder-id>`
-
 Optional:
-- Transcript source glob. Default on Windows: `$env:USERPROFILE/.cursor/projects/*/agent-transcripts/**/*.jsonl`
+- Export folder. Default: `~/cursor-transcript-export`.
+- Transcript source root. Default: auto-detect likely Cursor transcript roots.
 - Project slug or workspace name to filter transcript paths
 - Export label, such as the project name or teammate name
-
-## Upload Methods
-
-Prefer one of these authorized upload methods:
-
-- `rclone` with a configured Google Drive remote, usually named `gdrive`
-- Google Drive for desktop mounted as a local folder
-
-If neither upload method is available, create the export archive and ask the user which authorized Drive method to use.
-
-## Rclone Setup
-
-When the user chooses `rclone`, first check whether it is available:
-
-```powershell
-rclone version
-```
-
-If `rclone` is not installed on Windows and `winget` is available, install it:
-
-```powershell
-winget install --id Rclone.Rclone --exact --accept-source-agreements --accept-package-agreements
-```
-
-If the current shell cannot find `rclone` immediately after install, use the Winget package path directly:
-
-```powershell
-$rclone = "$env:LOCALAPPDATA\Microsoft\WinGet\Packages\Rclone.Rclone_Microsoft.Winget.Source_8wekyb3d8bbwe\rclone-v1.74.3-windows-amd64\rclone.exe"
-& $rclone version
-```
-
-Create or update the `gdrive` remote for the target folder ID:
-
-```powershell
-& $rclone config create gdrive drive scope drive root_folder_id "<folder-id>" --auto-confirm
-```
-
-This may open a browser for Google login. Wait for the authorization to complete before uploading.
 
 ## Steps
 
@@ -74,17 +38,17 @@ This may open a browser for Google login. Wait for the authorization to complete
    - The user is exporting their own Cursor transcripts, or
    - The user has explicit permission for the transcript files being exported.
 
-2. Parse the Google Drive folder ID from the link:
-   - Folder URL pattern: `/folders/<folder-id>`
-   - Query URL pattern: `?id=<folder-id>`
-   - If no folder ID is visible, ask the user for a valid Drive folder link.
+2. Decide the export folder:
+   - Use the folder provided by the user, if any.
+   - Otherwise use `~/cursor-transcript-export`.
 
-3. Find transcript files:
-   - Use the default local transcript glob unless the user gives a source.
+3. Find all Cursor transcript files:
+   - Search recursively under all likely Cursor roots listed in "Source Discovery".
    - Filter to the current project slug if the request is project-specific.
-   - Include only `.jsonl` transcript files.
+   - Include current `.jsonl` transcript files and legacy `.txt` transcript files.
+   - Include files only when their path contains `agent-transcripts`.
 
-4. Create a timestamped staging directory under `data/cursor-transcript-export/`.
+4. Create a timestamped folder inside the export folder.
 
 5. Copy transcript files into staging while preserving enough path context to identify the project/session.
 
@@ -92,78 +56,149 @@ This may open a browser for Google login. Wait for the authorization to complete
    - export timestamp
    - source machine/user label if provided
    - workspace path
-   - transcript glob used
+   - transcript source roots checked
    - count of files exported
    - relative filenames included
-   - target Drive folder ID
+   - skipped roots and errors, if any
 
-7. Compress the staging directory to a `.zip` archive.
+7. Optionally create a `.zip` archive next to the timestamped folder if the user asks for a compressed package.
 
-8. Upload the `.zip` archive:
-   - With `rclone`:
-     ```powershell
-     rclone copy "<archive.zip>" "gdrive:"
-     ```
-   - With Google Drive for desktop:
-     ```powershell
-     Copy-Item "<archive.zip>" "<local-google-drive-folder>"
-     ```
+8. Verify the export:
+   - Confirm the timestamped export folder exists.
+   - Confirm `manifest.json` exists.
+   - Confirm the copied transcript count matches the manifest count.
 
-9. Verify upload:
-   - For `rclone`, run:
-     ```powershell
-     rclone lsf "gdrive:"
-     ```
-   - For Drive for desktop, verify the archive exists at the mounted folder path.
-
-10. Report:
+9. Report:
    - number of transcript files packaged
-   - archive path
-   - upload method used
-   - whether upload verification succeeded
+   - export folder path
+   - archive path, if created
+   - whether verification succeeded
 
-## PowerShell Packaging Pattern
+## Source Discovery
 
-Use this pattern when generating the archive. Set `$driveFolderLink` from the user's Google Drive folder link before running it.
+Check all paths that exist and skip paths that do not. Do not fail the whole export because one candidate path is missing or unreadable.
 
-```powershell
-$driveFolderLink = "<google-drive-folder-link>"
-$folderId = if ($driveFolderLink -match '/folders/([^/?#]+)') {
-  $Matches[1]
-} elseif ($driveFolderLink -match '[?&]id=([^&#]+)') {
-  $Matches[1]
-} else {
-  throw "Could not parse a Google Drive folder ID from the provided link."
+Likely transcript roots:
+
+- `~/.cursor/projects`
+- `$CURSOR_AGENT_HOME/projects` if `CURSOR_AGENT_HOME` is set
+- `%USERPROFILE%/.cursor/projects` on Windows
+- `$HOME/.cursor/projects` on macOS/Linux
+- The attached/current project transcript root if Cursor exposes one in the session context
+
+If no transcript files are found:
+
+1. Create the timestamped export folder anyway.
+2. Write `manifest.json` with `transcript_count: 0`, checked roots, and errors.
+3. Ask the user for the folder that contains their Cursor `agent-transcripts` files.
+
+For remote shells, WSL, SSH, containers, or Codespaces:
+
+- First search the environment where the agent is running.
+- If that environment cannot see the host Cursor data folder, ask the user for a mounted host path or run the skill from the host Cursor session.
+- Do not claim success unless files were actually copied.
+
+## Tool Fallbacks
+
+Prefer this order:
+
+1. Python standard library script below.
+2. If Python is unavailable, use Node.js with `fs`, `path`, and `os`.
+3. If neither Python nor Node.js is available, use the current shell's native copy commands.
+4. If no executable method is available, provide exact manual copy instructions and still explain where the export folder should be created.
+
+## Cross-Platform Packaging Pattern
+
+Use Python for OS-independent export. It works on Windows, macOS, and Linux when Python is available.
+
+```python
+from datetime import datetime, timezone
+from pathlib import Path
+import json
+import os
+import shutil
+import socket
+
+home = Path.home()
+workspace = Path.cwd()
+export_root = home / "cursor-transcript-export"
+timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+stage = export_root / timestamp
+
+stage.mkdir(parents=True, exist_ok=True)
+
+candidate_roots = []
+
+def add_root(value):
+    if value:
+        path = Path(value).expanduser()
+        if path.name != "projects":
+            path = path / "projects"
+        if path not in candidate_roots:
+            candidate_roots.append(path)
+
+add_root(home / ".cursor" / "projects")
+add_root(os.environ.get("CURSOR_AGENT_HOME"))
+add_root(os.environ.get("USERPROFILE") and Path(os.environ["USERPROFILE"]) / ".cursor" / "projects")
+add_root(os.environ.get("HOME") and Path(os.environ["HOME"]) / ".cursor" / "projects")
+
+files = []
+checked_roots = []
+errors = []
+
+for root in candidate_roots:
+    checked_roots.append(str(root))
+    if not root.exists():
+        continue
+    try:
+        files.extend(
+            path
+            for path in root.rglob("*")
+            if path.is_file()
+            and path.suffix in {".jsonl", ".txt"}
+            and "agent-transcripts" in path.parts
+        )
+    except OSError as error:
+        errors.append({"root": str(root), "error": str(error)})
+
+files = sorted(set(files))
+
+copied = []
+for source in files:
+    try:
+        relative = source.relative_to(home)
+    except ValueError:
+        relative = Path("external") / source.drive.replace(":", "") / source.relative_to(source.anchor)
+    destination = stage / relative
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        shutil.copy2(source, destination)
+        copied.append(str(relative))
+    except OSError as error:
+        errors.append({"file": str(source), "error": str(error)})
+
+manifest = {
+    "exported_at": datetime.now(timezone.utc).isoformat(),
+    "workspace": str(workspace),
+    "source_roots_checked": checked_roots,
+    "export_root": str(export_root),
+    "stage": str(stage),
+    "machine": socket.gethostname(),
+    "user": os.environ.get("USER") or os.environ.get("USERNAME"),
+    "transcript_count": len(copied),
+    "files": copied,
+    "errors": errors,
 }
 
-$timestamp = Get-Date -Format "yyyyMMdd-HHmmss"
-$exportRoot = "data/cursor-transcript-export"
-$stage = Join-Path $exportRoot $timestamp
-$archive = Join-Path $exportRoot "cursor-transcripts-$timestamp.zip"
-New-Item -ItemType Directory -Force -Path $stage | Out-Null
+(stage / "manifest.json").write_text(
+    json.dumps(manifest, indent=2),
+    encoding="utf-8",
+)
 
-$files = Get-ChildItem -Path "$env:USERPROFILE\.cursor\projects" -Recurse -Filter "*.jsonl" |
-  Where-Object { $_.FullName -like "*agent-transcripts*" }
-
-foreach ($file in $files) {
-  $relative = $file.FullName.Substring($env:USERPROFILE.Length).TrimStart('\')
-  $destination = Join-Path $stage $relative
-  New-Item -ItemType Directory -Force -Path (Split-Path $destination -Parent) | Out-Null
-  Copy-Item $file.FullName $destination
-}
-
-$manifest = [ordered]@{
-  exported_at = (Get-Date).ToString("o")
-  workspace = (Get-Location).Path
-  target_drive_folder_id = $folderId
-  transcript_count = $files.Count
-  files = $files.FullName
-}
-$manifest | ConvertTo-Json -Depth 5 | Set-Content -Encoding UTF8 (Join-Path $stage "manifest.json")
-
-Compress-Archive -Path (Join-Path $stage "*") -DestinationPath $archive -Force
-Write-Output $archive
+print(stage)
 ```
+
+If Python is not available, use the current shell's native file-copy commands while preserving the same behavior and manifest fields.
 
 ## Output Style
 
@@ -173,7 +208,7 @@ Keep the final response brief:
 Export complete.
 
 - Packaged: [N] transcript files
-- Archive: `[path]`
-- Uploaded to: Google Drive folder `[folder-id]`
-- Verification: [passed/failed/not configured]
+- Folder: `[path]`
+- Archive: `[path or not created]`
+- Verification: [passed/failed]
 ```
