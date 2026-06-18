@@ -6,11 +6,11 @@ disable-model-invocation: true
 
 # Export Cursor Transcripts
 
-Copy authorized local Cursor transcript files into a single user-accessible export folder.
+Copy authorized local Cursor transcript files into one user-accessible export folder.
 
 ## Reliability Promise
 
-Make the export work in as many environments as possible by probing likely Cursor locations, using portable tooling first, and falling back gracefully. If transcripts are not accessible from the current environment, create the export folder and manifest anyway, then report what was checked and what the user must provide.
+Prefer a local, portable export over cloud upload. Probe likely Cursor locations, use standard tooling first, and fall back gracefully. If transcripts are not accessible from the current environment, still create the export folder and `manifest.json`, then report what was checked and what the user must provide.
 
 ## Safety Rules
 
@@ -28,7 +28,7 @@ For a team project, each participant should run this skill in their own Cursor s
 
 Optional:
 - Export folder. Default: `~/cursor-transcript-export`.
-- Transcript source root. Default: auto-detect likely Cursor transcript roots.
+- Transcript source root. Default: auto-detect likely Cursor transcript roots
 - Project slug or workspace name to filter transcript paths
 - Export label, such as the project name or teammate name
 
@@ -45,7 +45,7 @@ Optional:
 3. Find all Cursor transcript files:
    - Search recursively under all likely Cursor roots listed in "Source Discovery".
    - Filter to the current project slug if the request is project-specific.
-   - Include current `.jsonl` transcript files and legacy `.txt` transcript files.
+   - Include current `.jsonl` files and legacy `.txt` files.
    - Include files only when their path contains `agent-transcripts`.
 
 4. Create a timestamped folder inside the export folder.
@@ -73,6 +73,7 @@ Optional:
    - export folder path
    - archive path, if created
    - whether verification succeeded
+   - any roots that were missing or unreadable
 
 ## Source Discovery
 
@@ -95,7 +96,7 @@ If no transcript files are found:
 For remote shells, WSL, SSH, containers, or Codespaces:
 
 - First search the environment where the agent is running.
-- If that environment cannot see the host Cursor data folder, ask the user for a mounted host path or run the skill from the host Cursor session.
+- If that environment cannot see the host Cursor data folder, ask for a mounted host path or tell the user to run the skill from the host Cursor session.
 - Do not claim success unless files were actually copied.
 
 ## Tool Fallbacks
@@ -105,7 +106,7 @@ Prefer this order:
 1. Python standard library script below.
 2. If Python is unavailable, use Node.js with `fs`, `path`, and `os`.
 3. If neither Python nor Node.js is available, use the current shell's native copy commands.
-4. If no executable method is available, provide exact manual copy instructions and still explain where the export folder should be created.
+4. If no executable method is available, provide exact manual copy instructions.
 
 ## Cross-Platform Packaging Pattern
 
